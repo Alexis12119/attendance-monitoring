@@ -59,12 +59,13 @@ interface AttendanceRecord {
 }
 
 export default function StudentDashboard({ user }: { user: User }) {
-  const [subjects, setSubjects] = useState<Subject[]>([])
   const [sessions, setSessions] = useState<ClassSession[]>([])
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([])
   const [otcCode, setOtcCode] = useState("")
+  const [classCode, setClassCode] = useState("")
   const [isLoading, setIsLoading] = useState(true)
   const [isMarkingAttendance, setIsMarkingAttendance] = useState(false)
+  const [isJoiningClass, setIsJoiningClass] = useState(false)
   const router = useRouter()
   const supabase = createClient()
 
@@ -75,37 +76,19 @@ export default function StudentDashboard({ user }: { user: User }) {
   const fetchData = async () => {
     setIsLoading(true)
     try {
-      // Fetch enrolled subjects
-      const { data: enrollmentsData } = await supabase
-        .from("enrollments")
+      const { data: sessionsData } = await supabase
+        .from("class_sessions")
         .select(`
-          subjects (*)
+          *,
+          subjects (name, code)
         `)
-        .eq("student_id", user.id)
+        .eq("is_active", true)
+        .gte("expires_at", new Date().toISOString())
+        .order("session_date", { ascending: true })
+        .order("session_time", { ascending: true })
 
-      if (enrollmentsData) {
-        setSubjects(enrollmentsData.map((e) => e.subjects).filter(Boolean))
-      }
+      if (sessionsData) setSessions(sessionsData)
 
-      // Fetch active sessions for enrolled subjects
-      const subjectIds = enrollmentsData?.map((e) => e.subjects?.id).filter(Boolean) || []
-      if (subjectIds.length > 0) {
-        const { data: sessionsData } = await supabase
-          .from("class_sessions")
-          .select(`
-            *,
-            subjects (name, code)
-          `)
-          .in("subject_id", subjectIds)
-          .eq("is_active", true)
-          .gte("expires_at", new Date().toISOString())
-          .order("session_date", { ascending: true })
-          .order("session_time", { ascending: true })
-
-        if (sessionsData) setSessions(sessionsData)
-      }
-
-      // Fetch attendance history
       const { data: attendanceData } = await supabase
         .from("attendance")
         .select(`
@@ -132,6 +115,53 @@ export default function StudentDashboard({ user }: { user: User }) {
     }
   }
 
+  const joinClassByCode = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!classCode.trim()) return
+
+    setIsJoiningClass(true)
+
+    try {
+      const { data: subjectData } = await supabase
+        .from("subjects")
+        .select("id, name, code")
+        .eq("code", classCode.toUpperCase())
+        .single()
+
+      if (!subjectData) {
+        throw new Error("Subject not found with this code")
+      }
+
+      const { data: activeSessionsData } = await supabase
+        .from("class_sessions")
+        .select("*")
+        .eq("subject_id", subjectData.id)
+        .eq("is_active", true)
+        .gte("expires_at", new Date().toISOString())
+
+      if (!activeSessionsData || activeSessionsData.length === 0) {
+        throw new Error("No active sessions found for this subject")
+      }
+
+      toast({
+        title: "Success",
+        description: `Joined ${subjectData.name} (${subjectData.code}). You can now mark attendance for active sessions.`,
+      })
+
+      setClassCode("")
+      fetchData()
+    } catch (error) {
+      console.error("Error joining class:", error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to join class",
+        variant: "destructive",
+      })
+    } finally {
+      setIsJoiningClass(false)
+    }
+  }
+
   const markAttendance = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!otcCode.trim()) return
@@ -139,23 +169,35 @@ export default function StudentDashboard({ user }: { user: User }) {
     setIsMarkingAttendance(true)
 
     try {
-      // Find the session with matching OTC code
-      const session = sessions.find((s) => s.otc_code === otcCode.toUpperCase() && s.is_active)
+      const { data: sessionData } = await supabase
+        .from("class_sessions")
+        .select(`
+          *,
+          subjects (name, code)
+        `)
+        .eq("otc_code", otcCode.toUpperCase())
+        .eq("is_active", true)
+        .gte("expires_at", new Date().toISOString())
+        .single()
 
-      if (!session) {
+      if (!sessionData) {
         throw new Error("Invalid or expired OTC code")
       }
 
-      // Check if already marked attendance for this session
-      const existingAttendance = attendance.find((a) => a.session_id === session.id)
+      const { data: existingAttendance } = await supabase
+        .from("attendance")
+        .select("id")
+        .eq("student_id", user.id)
+        .eq("session_id", sessionData.id)
+        .single()
+
       if (existingAttendance) {
         throw new Error("You have already marked attendance for this session")
       }
 
-      // Mark attendance
       const { error } = await supabase.from("attendance").insert({
         student_id: user.id,
-        session_id: session.id,
+        session_id: sessionData.id,
         status: "present",
       })
 
@@ -163,11 +205,11 @@ export default function StudentDashboard({ user }: { user: User }) {
 
       toast({
         title: "Success",
-        description: `Attendance marked for ${session.subjects.name}`,
+        description: `Attendance marked for ${sessionData.subjects.name}`,
       })
 
       setOtcCode("")
-      fetchData() // Refresh data
+      fetchData()
     } catch (error) {
       console.error("Error marking attendance:", error)
       toast({
@@ -184,6 +226,18 @@ export default function StudentDashboard({ user }: { user: User }) {
     await supabase.auth.signOut()
     router.push("/")
   }
+
+  const attendedSubjects = Array.from(
+    new Map(
+      attendance.map((record) => [
+        record.class_sessions.subjects.code,
+        {
+          name: record.class_sessions.subjects.name,
+          code: record.class_sessions.subjects.code,
+        },
+      ]),
+    ).values(),
+  )
 
   if (isLoading) {
     return (
@@ -223,7 +277,7 @@ export default function StudentDashboard({ user }: { user: User }) {
         <Tabs defaultValue="attendance" className="space-y-6">
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="attendance">Mark Attendance</TabsTrigger>
-            <TabsTrigger value="subjects">My Subjects</TabsTrigger>
+            <TabsTrigger value="join">Join Class</TabsTrigger>
             <TabsTrigger value="history">Attendance History</TabsTrigger>
             <TabsTrigger value="live">Live Sessions</TabsTrigger>
           </TabsList>
@@ -292,36 +346,63 @@ export default function StudentDashboard({ user }: { user: User }) {
             </Card>
           </TabsContent>
 
-          {/* Subjects Tab */}
-          <TabsContent value="subjects" className="space-y-6">
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {subjects.map((subject) => (
-                <Card key={subject.id}>
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                      <span>{subject.name}</span>
-                      <Badge variant="outline">{subject.code}</Badge>
-                    </CardTitle>
-                    <CardDescription>{subject.description}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                      <BookOpen className="h-4 w-4" />
-                      <span>Enrolled</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+          {/* Join Class Tab */}
+          <TabsContent value="join" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Join Class</CardTitle>
+                <CardDescription>Enter the subject code to join a class and access its sessions</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={joinClassByCode} className="space-y-4">
+                  <div>
+                    <Label htmlFor="classCode">Subject Code</Label>
+                    <Input
+                      id="classCode"
+                      value={classCode}
+                      onChange={(e) => setClassCode(e.target.value.toUpperCase())}
+                      placeholder="Enter subject code (e.g., CS101)"
+                      className="text-center text-lg font-mono"
+                      required
+                    />
+                  </div>
+                  <Button type="submit" disabled={isJoiningClass} className="w-full">
+                    {isJoiningClass ? "Joining..." : "Join Class"}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
 
-            {subjects.length === 0 && (
-              <Card>
-                <CardContent className="text-center py-8">
-                  <BookOpen className="h-12 w-12 mx-auto mb-4 opacity-50 text-gray-400" />
-                  <p className="text-gray-500">You are not enrolled in any subjects yet</p>
-                </CardContent>
-              </Card>
-            )}
+            {/* Attended Subjects */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Attended Subjects</CardTitle>
+                <CardDescription>Subjects you have attended based on your attendance history</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {attendedSubjects.length > 0 ? (
+                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {attendedSubjects.map((subject) => (
+                      <div key={subject.code} className="flex items-center justify-between p-4 border rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <BookOpen className="h-4 w-4 text-blue-600" />
+                          <div>
+                            <h4 className="font-medium">{subject.name}</h4>
+                            <p className="text-sm text-gray-600">{subject.code}</p>
+                          </div>
+                        </div>
+                        <Badge variant="outline">Attended</Badge>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <BookOpen className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>No subjects attended yet. Join a class and mark attendance to see subjects here.</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* History Tab */}
@@ -365,7 +446,7 @@ export default function StudentDashboard({ user }: { user: User }) {
 
           {/* Live Sessions Tab */}
           <TabsContent value="live" className="space-y-6">
-            <RealtimeSessionStatus subjectIds={subjects.map((s) => s.id)} userRole="student" />
+            <RealtimeSessionStatus subjectIds={[]} userRole="student" />
           </TabsContent>
         </Tabs>
       </div>
