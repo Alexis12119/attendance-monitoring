@@ -141,13 +141,21 @@ export default function TeacherDashboard({ user }: { user: User }) {
     e.preventDefault()
     setIsCreatingSubject(true)
 
+    console.log("[v0] Starting subject creation with data:", subjectForm)
+    console.log("[v0] User ID:", user.id)
+
     try {
-      const { error } = await supabase.from("subjects").insert({
-        name: subjectForm.name,
-        code: subjectForm.code,
-        description: subjectForm.description,
-        teacher_id: user.id,
-      })
+      const { data, error } = await supabase
+        .from("subjects")
+        .insert({
+          name: subjectForm.name,
+          code: subjectForm.code,
+          description: subjectForm.description,
+          teacher_id: user.id,
+        })
+        .select()
+
+      console.log("[v0] Supabase response - data:", data, "error:", error)
 
       if (error) throw error
 
@@ -159,10 +167,10 @@ export default function TeacherDashboard({ user }: { user: User }) {
       setSubjectForm({ name: "", code: "", description: "" })
       fetchData()
     } catch (error) {
-      console.error("Error creating subject:", error)
+      console.error("[v0] Error creating subject:", error)
       toast({
         title: "Error",
-        description: "Failed to create subject",
+        description: `Failed to create subject: ${error.message}`,
         variant: "destructive",
       })
     } finally {
