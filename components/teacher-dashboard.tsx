@@ -183,11 +183,23 @@ export default function TeacherDashboard({ user }: { user: User }) {
     setIsCreatingSession(true)
 
     try {
+      const sessionDateTime = new Date(`${sessionForm.session_date}T${sessionForm.session_time}`)
+      const now = new Date()
+
+      if (sessionDateTime <= now) {
+        toast({
+          title: "Invalid Date/Time",
+          description: "Session date and time must be in the future",
+          variant: "destructive",
+        })
+        setIsCreatingSession(false)
+        return
+      }
+
       // Generate OTC code
       const otcCode = Math.random().toString(36).substring(2, 8).toUpperCase()
 
       // Calculate expiration time (session time + duration)
-      const sessionDateTime = new Date(`${sessionForm.session_date}T${sessionForm.session_time}`)
       const expiresAt = new Date(sessionDateTime.getTime() + Number.parseInt(sessionForm.duration) * 60000)
 
       const { error } = await supabase.from("class_sessions").insert({
@@ -487,6 +499,7 @@ export default function TeacherDashboard({ user }: { user: User }) {
                       <Input
                         id="date"
                         type="date"
+                        min={new Date().toISOString().split("T")[0]}
                         value={sessionForm.session_date}
                         onChange={(e) => setSessionForm({ ...sessionForm, session_date: e.target.value })}
                         required
@@ -497,6 +510,11 @@ export default function TeacherDashboard({ user }: { user: User }) {
                       <Input
                         id="time"
                         type="time"
+                        min={
+                          sessionForm.session_date === new Date().toISOString().split("T")[0]
+                            ? new Date().toTimeString().slice(0, 5)
+                            : undefined
+                        }
                         value={sessionForm.session_time}
                         onChange={(e) => setSessionForm({ ...sessionForm, session_time: e.target.value })}
                         required
