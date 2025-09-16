@@ -19,7 +19,6 @@ export default function SignUpPage() {
   const [confirmPassword, setConfirmPassword] = useState("")
   const [fullName, setFullName] = useState("")
   const [role, setRole] = useState<string>("")
-  const [studentId, setStudentId] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
@@ -36,12 +35,6 @@ export default function SignUpPage() {
       return
     }
 
-    if (role === "student" && !studentId) {
-      setError("Student ID is required for students")
-      setIsLoading(false)
-      return
-    }
-
     try {
       const { error } = await supabase.auth.signUp({
         email,
@@ -52,7 +45,6 @@ export default function SignUpPage() {
           data: {
             full_name: fullName,
             role: role,
-            student_id: role === "student" ? studentId : null,
           },
         },
       })
@@ -122,15 +114,11 @@ export default function SignUpPage() {
 
                   {role === "student" && (
                     <div className="grid gap-2">
-                      <Label htmlFor="studentId">Student ID</Label>
-                      <Input
-                        id="studentId"
-                        type="text"
-                        placeholder="2021-0001"
-                        required
-                        value={studentId}
-                        onChange={(e) => setStudentId(e.target.value)}
-                      />
+                      <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
+                        <p className="text-sm text-blue-700">
+                          📝 Your student ID will be automatically generated based on the current year (e.g., 2025001)
+                        </p>
+                      </div>
                     </div>
                   )}
 

@@ -14,6 +14,8 @@ import { toast } from "@/hooks/use-toast"
 import { BookOpen, Calendar, Clock, CheckCircle, LogOut, GraduationCap, RefreshCw } from "lucide-react"
 import { useRouter } from "next/navigation"
 import RealtimeSessionStatus from "./realtime-session-status"
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog"
+import { LoadingSpinner } from "@/components/ui/loading-spinner"
 
 interface User {
   id: string
@@ -66,8 +68,18 @@ export default function StudentDashboard({ user }: { user: User }) {
   const [isLoading, setIsLoading] = useState(true)
   const [isMarkingAttendance, setIsMarkingAttendance] = useState(false)
   const [isJoiningClass, setIsJoiningClass] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const router = useRouter()
   const supabase = createClient()
+
+  // Confirmation dialog state
+  const [confirmDialog, setConfirmDialog] = useState({
+    open: false,
+    title: "",
+    description: "",
+    onConfirm: () => {},
+    variant: "default" as "default" | "destructive",
+  })
 
   useEffect(() => {
     fetchData()
@@ -113,6 +125,16 @@ export default function StudentDashboard({ user }: { user: User }) {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true)
+    await fetchData()
+    setIsRefreshing(false)
+    toast({
+      title: "Refreshed",
+      description: "Dashboard data has been updated",
+    })
   }
 
   const joinClassByCode = async (e: React.FormEvent) => {
@@ -162,10 +184,23 @@ export default function StudentDashboard({ user }: { user: User }) {
     }
   }
 
-  const markAttendance = async (e: React.FormEvent) => {
+  const handleMarkAttendance = (e: React.FormEvent) => {
     e.preventDefault()
     if (!otcCode.trim()) return
 
+    setConfirmDialog({
+      open: true,
+      title: "Mark Attendance",
+      description: `Are you sure you want to mark attendance with OTC code: ${otcCode.toUpperCase()}?`,
+      onConfirm: () => {
+        setConfirmDialog((prev) => ({ ...prev, open: false }))
+        markAttendance(e)
+      },
+      variant: "default",
+    })
+  }
+
+  const markAttendance = async (e: React.FormEvent) => {
     setIsMarkingAttendance(true)
 
     try {
@@ -222,9 +257,18 @@ export default function StudentDashboard({ user }: { user: User }) {
     }
   }
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    router.push("/")
+  const handleLogout = () => {
+    setConfirmDialog({
+      open: true,
+      title: "Logout",
+      description: "Are you sure you want to logout? You will need to sign in again to access your dashboard.",
+      onConfirm: async () => {
+        setConfirmDialog((prev) => ({ ...prev, open: false }))
+        await supabase.auth.signOut()
+        router.push("/")
+      },
+      variant: "default",
+    })
   }
 
   const attendedSubjects = Array.from(
@@ -243,7 +287,7 @@ export default function StudentDashboard({ user }: { user: User }) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
+          <LoadingSpinner size="lg" className="mx-auto mb-4" />
           <p className="text-gray-600">Loading dashboard...</p>
         </div>
       </div>
@@ -265,10 +309,16 @@ export default function StudentDashboard({ user }: { user: User }) {
                 </p>
               </div>
             </div>
-            <Button variant="outline" onClick={handleLogout}>
-              <LogOut className="h-4 w-4 mr-2" />
-              Logout
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isRefreshing}>
+                <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
+              <Button variant="outline" onClick={handleLogout}>
+                <LogOut className="h-4 w-4 mr-2" />
+                Logout
+              </Button>
+            </div>
           </div>
         </div>
       </header>
@@ -290,7 +340,7 @@ export default function StudentDashboard({ user }: { user: User }) {
                 <CardDescription>Enter the OTC code provided by your teacher to mark attendance</CardDescription>
               </CardHeader>
               <CardContent>
-                <form onSubmit={markAttendance} className="space-y-4">
+                <form onSubmit={handleMarkAttendance} className="space-y-4">
                   <div>
                     <Label htmlFor="otc">OTC Code</Label>
                     <Input
@@ -304,6 +354,7 @@ export default function StudentDashboard({ user }: { user: User }) {
                     />
                   </div>
                   <Button type="submit" disabled={isMarkingAttendance} className="w-full">
+                    {isMarkingAttendance && <LoadingSpinner size="sm" className="mr-2" />}
                     {isMarkingAttendance ? "Marking..." : "Mark Attendance"}
                   </Button>
                 </form>
@@ -367,6 +418,7 @@ export default function StudentDashboard({ user }: { user: User }) {
                     />
                   </div>
                   <Button type="submit" disabled={isJoiningClass} className="w-full">
+                    {isJoiningClass && <LoadingSpinner size="sm" className="mr-2" />}
                     {isJoiningClass ? "Joining..." : "Join Class"}
                   </Button>
                 </form>
@@ -450,6 +502,15 @@ export default function StudentDashboard({ user }: { user: User }) {
           </TabsContent>
         </Tabs>
       </div>
+
+      <ConfirmationDialog
+        open={confirmDialog.open}
+        onOpenChange={(open) => setConfirmDialog((prev) => ({ ...prev, open }))}
+        title={confirmDialog.title}
+        description={confirmDialog.description}
+        onConfirm={confirmDialog.onConfirm}
+        variant={confirmDialog.variant}
+      />
     </div>
   )
 }

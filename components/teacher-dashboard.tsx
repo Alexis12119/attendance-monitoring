@@ -25,6 +25,7 @@ import { BookOpen, Calendar, Clock, Users, Plus, RefreshCw, LogOut, GraduationCa
 import { useRouter } from "next/navigation"
 import RealtimeAttendanceViewer from "./realtime-attendance-viewer"
 import RealtimeSessionStatus from "./realtime-session-status"
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog"
 
 interface User {
   id: string
@@ -78,6 +79,15 @@ export default function TeacherDashboard({ user }: { user: User }) {
     session_date: "",
     session_time: "",
     duration: "60", // minutes
+  })
+
+  // Confirmation dialog states
+  const [confirmDialog, setConfirmDialog] = useState({
+    open: false,
+    title: "",
+    description: "",
+    onConfirm: () => {},
+    variant: "default" as "default" | "destructive",
   })
 
   useEffect(() => {
@@ -178,8 +188,22 @@ export default function TeacherDashboard({ user }: { user: User }) {
     }
   }
 
-  const createSession = async (e: React.FormEvent) => {
+  const handleCreateSession = (e: React.FormEvent) => {
     e.preventDefault()
+    const selectedSubject = subjects.find((s) => s.id === sessionForm.subject_id)
+    setConfirmDialog({
+      open: true,
+      title: "Create Class Session",
+      description: `Are you sure you want to create a session for ${selectedSubject?.name} (${selectedSubject?.code}) on ${sessionForm.session_date} at ${sessionForm.session_time}?`,
+      onConfirm: () => {
+        setConfirmDialog((prev) => ({ ...prev, open: false }))
+        createSession(e)
+      },
+      variant: "default",
+    })
+  }
+
+  const createSession = async (e: React.FormEvent) => {
     setIsCreatingSession(true)
 
     try {
@@ -231,6 +255,19 @@ export default function TeacherDashboard({ user }: { user: User }) {
     }
   }
 
+  const handleToggleSessionStatus = (sessionId: string, currentStatus: boolean, sessionName: string) => {
+    setConfirmDialog({
+      open: true,
+      title: `${currentStatus ? "Deactivate" : "Activate"} Session`,
+      description: `Are you sure you want to ${currentStatus ? "deactivate" : "activate"} the session for ${sessionName}?`,
+      onConfirm: () => {
+        setConfirmDialog((prev) => ({ ...prev, open: false }))
+        toggleSessionStatus(sessionId, currentStatus)
+      },
+      variant: currentStatus ? "destructive" : "default",
+    })
+  }
+
   const toggleSessionStatus = async (sessionId: string, currentStatus: boolean) => {
     try {
       const { error } = await supabase.from("class_sessions").update({ is_active: !currentStatus }).eq("id", sessionId)
@@ -253,17 +290,41 @@ export default function TeacherDashboard({ user }: { user: User }) {
     }
   }
 
-  const copyOTCCode = (code: string) => {
-    navigator.clipboard.writeText(code)
-    toast({
-      title: "Copied",
-      description: "OTC code copied to clipboard",
+  const handleLogout = () => {
+    setConfirmDialog({
+      open: true,
+      title: "Logout",
+      description: "Are you sure you want to logout? You will need to sign in again to access your dashboard.",
+      onConfirm: async () => {
+        setConfirmDialog((prev) => ({ ...prev, open: false }))
+        await supabase.auth.signOut()
+        router.push("/")
+      },
+      variant: "default",
     })
   }
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    router.push("/")
+  const copyOTCCode = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code)
+      toast({
+        title: "Success",
+        description: "OTC code copied to clipboard",
+      })
+    } catch (error) {
+      // Fallback for older browsers
+      const textArea = document.createElement("textarea")
+      textArea.value = code
+      document.body.appendChild(textArea)
+      textArea.select()
+      document.execCommand("copy")
+      document.body.removeChild(textArea)
+
+      toast({
+        title: "Success",
+        description: "OTC code copied to clipboard",
+      })
+    }
   }
 
   if (isLoading) {
@@ -474,7 +535,7 @@ export default function TeacherDashboard({ user }: { user: User }) {
                     <DialogTitle>Create Class Session</DialogTitle>
                     <DialogDescription>Schedule a new class session with OTC code</DialogDescription>
                   </DialogHeader>
-                  <form onSubmit={createSession} className="space-y-4">
+                  <form onSubmit={handleCreateSession} className="space-y-4">
                     <div>
                       <Label htmlFor="subject">Subject</Label>
                       <Select
@@ -577,7 +638,13 @@ export default function TeacherDashboard({ user }: { user: User }) {
                         <Button
                           variant={session.is_active ? "destructive" : "default"}
                           size="sm"
-                          onClick={() => toggleSessionStatus(session.id, session.is_active)}
+                          onClick={() =>
+                            handleToggleSessionStatus(
+                              session.id,
+                              session.is_active,
+                              `${session.subjects.name} (${session.subjects.code})`,
+                            )
+                          }
                         >
                           {session.is_active ? "Deactivate" : "Activate"}
                         </Button>
@@ -679,6 +746,15 @@ export default function TeacherDashboard({ user }: { user: User }) {
           </TabsContent>
         </Tabs>
       </div>
+
+      <ConfirmationDialog
+        open={confirmDialog.open}
+        onOpenChange={(open) => setConfirmDialog((prev) => ({ ...prev, open }))}
+        title={confirmDialog.title}
+        description={confirmDialog.description}
+        onConfirm={confirmDialog.onConfirm}
+        variant={confirmDialog.variant}
+      />
     </div>
   )
 }
